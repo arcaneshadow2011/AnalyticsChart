@@ -1,0 +1,5 @@
+{
+  "name": "AnalyticsChart",
+  "description": "A modern data visualization tool with CSV import, moving averages, and event annotations.",
+  "requestFramePermissions": []
+}

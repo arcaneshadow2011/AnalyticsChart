@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useImperativeHandle, forwardRef } from 'react';
+import React, { useMemo, useRef, useImperativeHandle, forwardRef, useEffect } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -44,6 +44,23 @@ export interface ChartHandle {
 
 export const DataChart = forwardRef<ChartHandle, ChartProps>(({ data, notes, config }, ref) => {
   const chartRef = useRef<any>(null);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = chartContainerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      chartRef.current?.resize();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => chartRef.current?.resize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useImperativeHandle(ref, () => ({
     exportImage: (imageFormat: 'png' | 'jpeg') => {
@@ -144,7 +161,7 @@ export const DataChart = forwardRef<ChartHandle, ChartProps>(({ data, notes, con
         type: 'line' as const,
         label: `${config.movingAveragePeriod}-month avg`,
         data: movingAverage,
-        borderColor: '#9FE1CB',
+        borderColor: config.movingAverageColor,
         borderWidth: 2,
         pointRadius: 0,
         tension: 0.4,
@@ -162,7 +179,13 @@ export const DataChart = forwardRef<ChartHandle, ChartProps>(({ data, notes, con
 
   const options: ChartOptions<'bar' | 'line'> = {
     responsive: true,
-    maintainAspectRatio: false,
+    maintainAspectRatio: true,
+    aspectRatio: 2.1,
+    layout: {
+      padding: {
+        top: notes.length > 0 ? 28 : 8,
+      },
+    },
     plugins: {
       title: {
         display: true,
@@ -173,13 +196,26 @@ export const DataChart = forwardRef<ChartHandle, ChartProps>(({ data, notes, con
         color: '#1f2937',
       },
       legend: {
-        display: config.datasets.length > 1,
+        display: config.datasets.length + (config.showMovingAverage ? 1 : 0) > 1,
         position: 'top',
         align: 'center',
         labels: {
           usePointStyle: true,
           boxWidth: 8,
-          font: { size: 11 }
+          font: { size: 11 },
+          generateLabels: (chart) => {
+            const defaultLabels = ChartJS.defaults.plugins.legend.labels.generateLabels(chart);
+            return defaultLabels.map((label) => {
+              const dataset = chart.data.datasets[label.datasetIndex];
+              if (dataset?.type === 'line') {
+                return {
+                  ...label,
+                  pointStyle: 'line',
+                };
+              }
+              return label;
+            });
+          },
         }
       },
       tooltip: {
@@ -190,7 +226,7 @@ export const DataChart = forwardRef<ChartHandle, ChartProps>(({ data, notes, con
         cornerRadius: 8,
       },
       annotation: {
-        annotations: notes.reduce((acc, note) => {
+        annotations: notes.reduce((acc, note, noteIndex) => {
           const dataIndex = data.findIndex((d) => d.date === note.date);
           if (dataIndex === -1) return acc;
 
@@ -198,19 +234,20 @@ export const DataChart = forwardRef<ChartHandle, ChartProps>(({ data, notes, con
             type: 'line',
             xMin: dataIndex,
             xMax: dataIndex,
-            borderColor: '#73726c',
+            borderColor: 'rgba(115, 114, 108, 0.55)',
             borderWidth: 1,
             borderDash: [4, 4],
             label: {
               display: true,
               content: note.label,
-              position: 'start',
-              backgroundColor: '#f5f5f3',
-              color: '#73726c',
+              position: 'end',
+              backgroundColor: 'rgba(245, 245, 243, 0.8)',
+              color: 'rgba(55, 65, 81, 0.8)',
               font: { size: 11, weight: 'bold' },
-              padding: 6,
-              borderRadius: 4,
-              yAdjust: -20,
+              padding: { top: 5, bottom: 5, left: 8, right: 8 },
+              borderRadius: 6,
+              yAdjust: -6,
+              xAdjust: noteIndex % 2 === 0 ? -6 : 6,
             },
           };
           return acc;
@@ -240,7 +277,7 @@ export const DataChart = forwardRef<ChartHandle, ChartProps>(({ data, notes, con
         },
         title: {
           display: true,
-          text: 'Values',
+          text: config.yAxisTitle,
           font: { size: 12, weight: 'bold' },
           color: '#73726c',
         }
@@ -249,7 +286,11 @@ export const DataChart = forwardRef<ChartHandle, ChartProps>(({ data, notes, con
   };
 
   return (
-    <div className="w-full h-full min-h-[400px] p-6 bg-white rounded-xl border border-gray-100">
+    <div
+      ref={chartContainerRef}
+      className="relative w-full h-full min-h-[360px] min-w-0 p-6 rounded-xl border border-gray-100"
+      style={{ backgroundColor: config.chartBackgroundColor }}
+    >
       <Chart ref={chartRef} type="bar" data={chartData} options={options} />
     </div>
   );

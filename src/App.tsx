@@ -30,6 +30,9 @@ export default function App() {
   ]);
   const [config, setConfig] = useState<ChartConfig>({
     title: 'Monthly Performance',
+    yAxisTitle: 'Values',
+    movingAverageColor: '#9FE1CB',
+    chartBackgroundColor: '#ffffff',
     datasets: [{ key: 'total', label: 'Total', color: '#185FA5' }],
     stacked: false,
     stackedKeys: ['total'],
@@ -58,18 +61,19 @@ export default function App() {
     : 'No data';
 
   return (
-    <div className="flex h-screen bg-white text-gray-900 font-sans">
+    <div className="flex h-screen min-h-0 min-w-0 bg-white text-gray-900 font-sans">
       <Sidebar 
         config={config}
         setConfig={setConfig}
         notes={notes}
         setNotes={setNotes}
+        data={data}
         setData={setData}
         availableDates={availableDates}
         onExport={(format) => chartRef.current?.exportImage(format)}
       />
       
-      <main className="flex-1 flex flex-col overflow-hidden bg-gray-50/30">
+      <main className="flex-1 flex flex-col overflow-hidden bg-gray-50/30 min-h-0 min-w-0">
         <header className="h-16 border-b border-gray-200 bg-white px-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-[#185FA5] rounded-lg text-white">
@@ -85,8 +89,8 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex-1 p-10 overflow-y-auto">
-          <div className="max-w-5xl mx-auto space-y-8">
+        <div className="flex-1 min-h-0 p-6 md:p-10 overflow-y-auto overflow-x-hidden">
+          <div className="w-full max-w-full space-y-8">
             {/* KPI Grid - Matching Reference Aesthetic */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="bg-[#f5f5f3] rounded-lg p-4 shadow-sm border border-gray-100">
@@ -111,11 +115,11 @@ export default function App() {
               </div>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-4 min-w-0">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-bold tracking-tight text-gray-800">{config.title}</h2>
               </div>
-              <div className="h-[400px] w-full">
+              <div className="w-full min-h-[360px] lg:min-h-[460px] min-w-0">
                 <DataChart ref={chartRef} data={data} notes={notes} config={config} />
               </div>
             </div>

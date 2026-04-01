@@ -1,6 +1,22 @@
 import React, { useState } from 'react';
 import Papa from 'papaparse';
-import { Upload, Plus, Trash2, Settings, Download, Edit2, Check, X, Layers, ChevronUp, ChevronDown } from 'lucide-react';
+import {
+  Upload,
+  Plus,
+  Trash2,
+  Settings,
+  Download,
+  Edit2,
+  Check,
+  X,
+  Layers,
+  ChevronUp,
+  ChevronDown,
+  Palette,
+  BarChart3,
+  Table2,
+  MessageSquare,
+} from 'lucide-react';
 import { ChartConfig, ChartNote, DataPoint, DatasetConfig } from '../types';
 import { cn, parseCSVDate } from '../lib/utils';
 
@@ -9,6 +25,7 @@ interface SidebarProps {
   setConfig: (config: ChartConfig) => void;
   notes: ChartNote[];
   setNotes: (notes: ChartNote[]) => void;
+  data: DataPoint[];
   setData: (data: DataPoint[]) => void;
   availableDates: string[];
   onExport: (format: 'png' | 'jpeg') => void;
@@ -16,11 +33,112 @@ interface SidebarProps {
 
 const PRESET_COLORS = ['#185FA5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
+type SectionId = 'export' | 'import' | 'appearance' | 'series' | 'display' | 'data' | 'notes';
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <span className="text-xs font-medium text-slate-500">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function ToggleRow({
+  label,
+  help,
+  checked,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  help?: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label
+      className={cn(
+        'flex cursor-pointer items-start justify-between gap-3 rounded-xl border px-3 py-2.5 transition-colors',
+        disabled
+          ? 'cursor-not-allowed border-slate-100 bg-slate-50/50 opacity-60'
+          : 'border-slate-100 bg-slate-50/90 hover:border-slate-200 hover:bg-slate-50'
+      )}
+    >
+      <div className="min-w-0 pt-0.5">
+        <p className="text-sm font-medium text-slate-800">{label}</p>
+        {help ? <p className="mt-0.5 text-xs leading-snug text-slate-500">{help}</p> : null}
+      </div>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-[#185FA5] focus:ring-2 focus:ring-[#185FA5]/30"
+      />
+    </label>
+  );
+}
+
+function CollapsibleSection({
+  title,
+  icon: Icon,
+  open,
+  onToggle,
+  children,
+  contentClassName,
+}: {
+  title: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+  contentClassName?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm ring-1 ring-slate-900/[0.04]">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-2 px-4 py-3.5 text-left transition-colors hover:bg-slate-50/90"
+      >
+        <span className="flex items-center gap-2.5 text-sm font-semibold text-slate-800">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+            <Icon size={16} strokeWidth={2} />
+          </span>
+          {title}
+        </span>
+        <ChevronDown
+          size={18}
+          className={cn('shrink-0 text-slate-400 transition-transform duration-200', open && 'rotate-180')}
+        />
+      </button>
+      {open ? (
+        <div className="border-t border-slate-100 p-4">
+          <div
+            className={cn(
+              'space-y-4 max-h-[20rem] overflow-y-auto pr-1',
+              contentClassName
+            )}
+          >
+            {children}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const inputClass =
+  'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:border-[#185FA5] focus:outline-none focus:ring-2 focus:ring-[#185FA5]/20';
+
 export const Sidebar: React.FC<SidebarProps> = ({
   config,
   setConfig,
   notes,
   setNotes,
+  data,
   setData,
   availableDates,
   onExport,
@@ -28,6 +146,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [newNote, setNewNote] = useState({ date: '', label: '', colorChange: '' });
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<ChartNote | null>(null);
+
+  const [openSection, setOpenSection] = useState<Record<SectionId, boolean>>({
+    export: true,
+    import: true,
+    appearance: true,
+    series: true,
+    display: true,
+    data: false,
+    notes: true,
+  });
+
+  const toggleSection = (id: SectionId) => {
+    setOpenSection((s) => ({ ...s, [id]: !s[id] }));
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -38,18 +170,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       skipEmptyLines: true,
       complete: (results) => {
         if (results.data.length === 0) return;
-        
-        const headers = Object.keys(results.data[0]);
-        const dateKey = headers.find(h => h.toLowerCase() === 'date') || headers[0];
-        const valueKeys = headers.filter(h => h !== dateKey && h.toLowerCase() !== 'total');
-        
-        // If no specific value keys found (like just Date and Total), use Total
-        const keysToUse = valueKeys.length > 0 ? valueKeys : [headers.find(h => h.toLowerCase() === 'total') || headers[1]];
 
-        const parsedData: DataPoint[] = results.data
+        const headers = Object.keys(results.data[0] as object);
+        const dateKey = headers.find((h) => h.toLowerCase() === 'date') || headers[0];
+        const valueKeys = headers.filter((h) => h !== dateKey && h.toLowerCase() !== 'total');
+
+        const keysToUse =
+          valueKeys.length > 0 ? valueKeys : [headers.find((h) => h.toLowerCase() === 'total') || headers[1]];
+
+        const parsedData: DataPoint[] = (results.data as any[])
           .map((row: any) => {
             const point: DataPoint = { date: parseCSVDate(row[dateKey]) };
-            keysToUse.forEach(key => {
+            keysToUse.forEach((key) => {
               point[key] = parseFloat(row[key]) || 0;
             });
             return point;
@@ -59,19 +191,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         if (parsedData.length > 0) {
           setData(parsedData);
-          
-          // Auto-configure datasets based on found keys
+
           const newDatasets: DatasetConfig[] = keysToUse.map((key, i) => ({
             key,
             label: key,
-            color: PRESET_COLORS[i % PRESET_COLORS.length]
+            color: PRESET_COLORS[i % PRESET_COLORS.length],
           }));
-          
+
           setConfig({
             ...config,
             datasets: newDatasets,
-            stackedKeys: keysToUse // Default all to stacked if stacked is enabled
+            stackedKeys: keysToUse,
           });
+          setOpenSection((s) => ({ ...s, data: true }));
         }
       },
     });
@@ -79,7 +211,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const toggleStackedKey = (key: string) => {
     const newKeys = config.stackedKeys.includes(key)
-      ? config.stackedKeys.filter(k => k !== key)
+      ? config.stackedKeys.filter((k) => k !== key)
       : [...config.stackedKeys, key];
     setConfig({ ...config, stackedKeys: newKeys });
   };
@@ -88,11 +220,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const newDatasets = [...config.datasets];
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= newDatasets.length) return;
-    
+
     const temp = newDatasets[index];
     newDatasets[index] = newDatasets[targetIndex];
     newDatasets[targetIndex] = temp;
-    
+
     setConfig({ ...config, datasets: newDatasets });
   };
 
@@ -109,7 +241,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const saveEdit = () => {
     if (editForm) {
-      setNotes(notes.map(n => n.id === editForm.id ? editForm : n));
+      setNotes(notes.map((n) => (n.id === editForm.id ? editForm : n)));
       setEditingNoteId(null);
       setEditForm(null);
     }
@@ -122,190 +254,305 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const updateDatasetColor = (key: string, color: string) => {
     setConfig({
       ...config,
-      datasets: config.datasets.map(ds => ds.key === key ? { ...ds, color } : ds)
+      datasets: config.datasets.map((ds) => (ds.key === key ? { ...ds, color } : ds)),
     });
   };
 
+  const updateDataCell = (rowIndex: number, key: string, value: string) => {
+    const nextData = [...data];
+    const row = { ...nextData[rowIndex] };
+    if (key === 'date') {
+      row.date = parseCSVDate(value);
+    } else {
+      row[key] = parseFloat(value) || 0;
+    }
+    nextData[rowIndex] = row;
+    setData(nextData);
+  };
+
   return (
-    <div className="w-80 h-full bg-gray-50 border-r border-gray-200 p-6 overflow-y-auto flex flex-col gap-8">
-      <section>
-        <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4 flex items-center gap-2">
-          <Download size={14} /> Export Chart
-        </h2>
-        <div className="flex gap-2">
-          <button 
-            onClick={() => onExport('png')}
-            className="flex-1 py-2 bg-white border border-gray-200 rounded-lg text-xs font-semibold hover:bg-gray-50 transition-colors"
-          >
-            PNG
-          </button>
-          <button 
-            onClick={() => onExport('jpeg')}
-            className="flex-1 py-2 bg-white border border-gray-200 rounded-lg text-xs font-semibold hover:bg-gray-50 transition-colors"
-          >
-            JPG
-          </button>
-        </div>
-      </section>
+    <aside className="flex h-full w-[min(100vw-2rem,20rem)] shrink-0 flex-col overflow-hidden border-r border-slate-200/80 bg-gradient-to-b from-slate-50 to-slate-100/90">
+      <div className="border-b border-slate-200/80 bg-white/60 px-5 py-4 backdrop-blur-sm">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Configure</p>
+        <p className="mt-0.5 text-sm font-semibold text-slate-900">Chart & data</p>
+      </div>
 
-      <section>
-        <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4 flex items-center gap-2">
-          <Upload size={14} /> Data Import
-        </h2>
-        <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
-          <div className="flex flex-col items-center justify-center pt-5 pb-6">
-            <Upload className="w-8 h-8 mb-3 text-gray-400" />
-            <p className="mb-2 text-sm text-gray-500">
-              <span className="font-semibold">Click to upload</span>
-            </p>
-            <p className="text-xs text-gray-400">CSV (Date, iOS, Android...)</p>
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4 pb-8">
+        <CollapsibleSection
+          title="Export"
+          icon={Download}
+          open={openSection.export}
+          onToggle={() => toggleSection('export')}
+        >
+          <p className="text-xs text-slate-500">Download the current chart as an image.</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => onExport('png')}
+              className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-xs font-semibold text-slate-800 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
+            >
+              PNG
+            </button>
+            <button
+              type="button"
+              onClick={() => onExport('jpeg')}
+              className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-xs font-semibold text-slate-800 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
+            >
+              JPG
+            </button>
           </div>
-          <input type="file" className="hidden" accept=".csv" onChange={handleFileUpload} />
-        </label>
-      </section>
+        </CollapsibleSection>
 
-      <section>
-        <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4 flex items-center gap-2">
-          <Settings size={14} /> Chart Settings
-        </h2>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Chart Title</label>
+        <CollapsibleSection
+          title="Import data"
+          icon={Upload}
+          open={openSection.import}
+          onToggle={() => toggleSection('import')}
+        >
+          <label className="group flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/50 px-4 py-8 transition-colors hover:border-[#185FA5]/40 hover:bg-[#185FA5]/[0.03]">
+            <Upload className="mb-2 h-9 w-9 text-slate-400 transition-colors group-hover:text-[#185FA5]" />
+            <p className="text-center text-sm font-medium text-slate-700">
+              <span className="text-[#185FA5]">Choose a CSV</span>
+              <span className="text-slate-500"> or drop it here</span>
+            </p>
+            <p className="mt-1 text-center text-xs text-slate-400">Columns: Date, then value columns</p>
+            <input type="file" className="hidden" accept=".csv" onChange={handleFileUpload} />
+          </label>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="Titles & appearance"
+          icon={Palette}
+          open={openSection.appearance}
+          onToggle={() => toggleSection('appearance')}
+        >
+          <Field label="Chart title">
             <input
               type="text"
               value={config.title}
               onChange={(e) => setConfig({ ...config, title: e.target.value })}
-              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Y-axis label">
+            <input
+              type="text"
+              value={config.yAxisTitle}
+              onChange={(e) => setConfig({ ...config, yAxisTitle: e.target.value })}
+              className={inputClass}
+            />
+          </Field>
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/90 px-3 py-2.5">
+            <span className="text-sm font-medium text-slate-800">Plot background</span>
+            <input
+              type="color"
+              value={config.chartBackgroundColor}
+              onChange={(e) => setConfig({ ...config, chartBackgroundColor: e.target.value })}
+              className="h-9 w-12 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 shadow-sm"
+              title="Chart background color"
             />
           </div>
+        </CollapsibleSection>
 
+        <CollapsibleSection
+          title="Series"
+          icon={BarChart3}
+          open={openSection.series}
+          onToggle={() => toggleSection('series')}
+        >
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700">Datasets</label>
             {config.datasets.map((ds, index) => (
-              <div key={ds.key} className="flex flex-col gap-2 p-2 bg-white border border-gray-200 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1">
+              <div
+                key={ds.key}
+                className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-slate-50/80 p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
                     <div className="flex flex-col">
-                      <button 
+                      <button
+                        type="button"
                         onClick={() => moveDataset(index, 'up')}
                         disabled={index === 0}
-                        className="p-0.5 text-gray-400 hover:text-blue-500 disabled:opacity-30"
+                        className="rounded p-0.5 text-slate-400 hover:bg-white hover:text-[#185FA5] disabled:opacity-25"
+                        aria-label="Move series up"
                       >
-                        <ChevronUp size={12} />
+                        <ChevronUp size={14} />
                       </button>
-                      <button 
+                      <button
+                        type="button"
                         onClick={() => moveDataset(index, 'down')}
                         disabled={index === config.datasets.length - 1}
-                        className="p-0.5 text-gray-400 hover:text-blue-500 disabled:opacity-30"
+                        className="rounded p-0.5 text-slate-400 hover:bg-white hover:text-[#185FA5] disabled:opacity-25"
+                        aria-label="Move series down"
                       >
-                        <ChevronDown size={12} />
+                        <ChevronDown size={14} />
                       </button>
                     </div>
-                    <span className="text-xs font-medium truncate max-w-[100px]">{ds.label}</span>
+                    <span className="truncate text-sm font-medium text-slate-800">{ds.label}</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {config.stacked && (
-                      <div className="flex items-center gap-1">
-                        <span className="text-[10px] text-gray-400">Stack</span>
-                        <input 
+                  <div className="flex shrink-0 items-center gap-2">
+                    {config.stacked ? (
+                      <label className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                        <input
                           type="checkbox"
                           checked={config.stackedKeys.includes(ds.key)}
                           onChange={() => toggleStackedKey(ds.key)}
-                          className="w-3 h-3"
+                          className="h-3.5 w-3.5 rounded border-slate-300 text-[#185FA5]"
                         />
-                      </div>
-                    )}
-                    <input 
-                      type="color" 
-                      value={ds.color} 
+                        Stack
+                      </label>
+                    ) : null}
+                    <input
+                      type="color"
+                      value={ds.color}
                       onChange={(e) => updateDatasetColor(ds.key, e.target.value)}
-                      className="w-6 h-6 p-0.5 bg-white border border-gray-300 rounded cursor-pointer"
+                      className="h-8 w-10 cursor-pointer rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm"
+                      title={`Color for ${ds.label}`}
                     />
                   </div>
                 </div>
               </div>
             ))}
           </div>
+        </CollapsibleSection>
 
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
-              <Layers size={14} /> Stacked
-            </label>
-            <input
-              type="checkbox"
-              checked={config.stacked}
-              onChange={(e) => setConfig({ ...config, stacked: e.target.checked, overlap: e.target.checked ? false : config.overlap })}
-              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
-              <Layers size={14} className="rotate-90" /> Overlap Bars
-            </label>
-            <input
-              type="checkbox"
-              checked={config.overlap}
-              onChange={(e) => setConfig({ ...config, overlap: e.target.checked, stacked: e.target.checked ? false : config.stacked })}
-              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-gray-700">Value-based Gradient</label>
-            <input
-              type="checkbox"
-              checked={config.valueBasedGradient}
-              onChange={(e) => setConfig({ ...config, valueBasedGradient: e.target.checked })}
-              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-            />
-          </div>
-          {!config.valueBasedGradient && (
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-gray-700">Area Gradient</label>
-              <input
-                type="checkbox"
-                checked={config.useGradient}
-                onChange={(e) => setConfig({ ...config, useGradient: e.target.checked })}
-                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-              />
+        <CollapsibleSection
+          title="Display options"
+          icon={Settings}
+          open={openSection.display}
+          onToggle={() => toggleSection('display')}
+        >
+          <ToggleRow
+            label="Stacked bars"
+            help="Sum series into one bar per period."
+            checked={config.stacked}
+            onChange={(v) =>
+              setConfig({ ...config, stacked: v, overlap: v ? false : config.overlap })
+            }
+          />
+          <ToggleRow
+            label="Overlap bars"
+            help="Draw series on top of each other (not stacked)."
+            checked={config.overlap}
+            onChange={(v) =>
+              setConfig({ ...config, overlap: v, stacked: v ? false : config.stacked })
+            }
+          />
+          <ToggleRow
+            label="Value-based gradient"
+            help="Opacity varies by bar height."
+            checked={config.valueBasedGradient}
+            onChange={(v) => setConfig({ ...config, valueBasedGradient: v })}
+          />
+          <ToggleRow
+            label="Area gradient"
+            help="Vertical gradient fill on bars."
+            checked={config.useGradient}
+            disabled={config.valueBasedGradient}
+            onChange={(v) => setConfig({ ...config, useGradient: v })}
+          />
+          <ToggleRow
+            label="Moving average line"
+            help="Trend line over the primary or stacked total."
+            checked={config.showMovingAverage}
+            onChange={(v) => setConfig({ ...config, showMovingAverage: v })}
+          />
+          {config.showMovingAverage ? (
+            <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3">
+              <Field label="Window (months)">
+                <input
+                  type="number"
+                  min={1}
+                  value={config.movingAveragePeriod}
+                  onChange={(e) =>
+                    setConfig({ ...config, movingAveragePeriod: parseInt(e.target.value, 10) || 1 })
+                  }
+                  className={inputClass}
+                />
+              </Field>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-slate-800">Line color</span>
+                <input
+                  type="color"
+                  value={config.movingAverageColor}
+                  onChange={(e) => setConfig({ ...config, movingAverageColor: e.target.value })}
+                  className="h-9 w-12 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 shadow-sm"
+                />
+              </div>
             </div>
-          )}
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-gray-700">Show Moving Avg</label>
-            <input
-              type="checkbox"
-              checked={config.showMovingAverage}
-              onChange={(e) => setConfig({ ...config, showMovingAverage: e.target.checked })}
-              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-            />
-          </div>
-          {config.showMovingAverage && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">MA Period (Months)</label>
-              <input
-                type="number"
-                value={config.movingAveragePeriod}
-                onChange={(e) => setConfig({ ...config, movingAveragePeriod: parseInt(e.target.value) || 1 })}
-                className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
-          )}
-        </div>
-      </section>
+          ) : null}
+        </CollapsibleSection>
 
-      <section className="flex-1 pb-8">
-        <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4 flex items-center gap-2">
-          <Plus size={14} /> Annotations & Events
-        </h2>
-        <div className="space-y-4">
-          <div className="p-4 bg-white border border-gray-200 rounded-xl space-y-3">
+        <CollapsibleSection
+          title="Data editor"
+          icon={Table2}
+          open={openSection.data}
+          onToggle={() => toggleSection('data')}
+          contentClassName="max-h-[24rem]"
+        >
+          <p className="text-xs leading-relaxed text-slate-500">
+            Edit values inline. Changes apply immediately; no need to re-upload the CSV.
+          </p>
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="max-h-72 overflow-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 z-10 bg-slate-100/95 backdrop-blur-sm">
+                  <tr>
+                    <th className="min-w-[112px] px-2.5 py-2.5 text-left font-semibold text-slate-600">Date</th>
+                    {config.datasets.map((ds) => (
+                      <th key={ds.key} className="min-w-[88px] px-2.5 py-2.5 text-left font-semibold text-slate-600">
+                        {ds.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.map((row, rowIndex) => (
+                    <tr
+                      key={`${row.date}-${rowIndex}`}
+                      className="border-t border-slate-100 odd:bg-white even:bg-slate-50/50"
+                    >
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="text"
+                          value={row.date}
+                          onChange={(e) => updateDataCell(rowIndex, 'date', e.target.value)}
+                          className="w-full rounded-lg border border-transparent bg-transparent px-2 py-1 font-mono text-[11px] text-slate-800 hover:border-slate-200 focus:border-[#185FA5] focus:outline-none focus:ring-1 focus:ring-[#185FA5]/30"
+                        />
+                      </td>
+                      {config.datasets.map((ds) => (
+                        <td key={ds.key} className="px-2 py-1.5">
+                          <input
+                            type="number"
+                            step="any"
+                            value={row[ds.key] ?? 0}
+                            onChange={(e) => updateDataCell(rowIndex, ds.key, e.target.value)}
+                            className="w-full rounded-lg border border-transparent bg-transparent px-2 py-1 text-right font-mono text-[11px] text-slate-800 tabular-nums hover:border-slate-200 focus:border-[#185FA5] focus:outline-none focus:ring-1 focus:ring-[#185FA5]/30"
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="Annotations"
+          icon={MessageSquare}
+          open={openSection.notes}
+          onToggle={() => toggleSection('notes')}
+          contentClassName="max-h-[24rem]"
+        >
+          <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/80 p-4">
             <select
               value={newNote.date}
               onChange={(e) => setNewNote({ ...newNote, date: e.target.value })}
-              className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm outline-none"
+              className={inputClass}
             >
-              <option value="">Select Date</option>
+              <option value="">Select a date</option>
               {availableDates.map((date) => (
                 <option key={date} value={date}>
                   {date}
@@ -314,92 +561,119 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </select>
             <input
               type="text"
-              placeholder="Event Label"
+              placeholder="Label (e.g. product launch)"
               value={newNote.label}
               onChange={(e) => setNewNote({ ...newNote, label: e.target.value })}
-              className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm outline-none"
+              className={inputClass}
             />
-            <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg border border-gray-200">
+            <div className="flex items-center justify-between rounded-xl border border-slate-100 bg-white px-3 py-2.5">
+              <label htmlFor="colorChangeToggle" className="text-sm font-medium text-slate-700">
+                Tint bars after this date
+              </label>
               <div className="flex items-center gap-2">
-                <input 
-                  type="checkbox"
+                <input
                   id="colorChangeToggle"
+                  type="checkbox"
                   checked={!!newNote.colorChange}
                   onChange={(e) => setNewNote({ ...newNote, colorChange: e.target.checked ? '#185FA5' : '' })}
-                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                  className="h-4 w-4 rounded border-slate-300 text-[#185FA5] focus:ring-[#185FA5]/30"
                 />
-                <label htmlFor="colorChangeToggle" className="text-xs font-medium text-gray-700">Change color?</label>
+                {newNote.colorChange ? (
+                  <input
+                    type="color"
+                    value={newNote.colorChange}
+                    onChange={(e) => setNewNote({ ...newNote, colorChange: e.target.value })}
+                    className="h-8 w-10 cursor-pointer rounded-lg border border-slate-200 p-0.5"
+                  />
+                ) : null}
               </div>
-              {newNote.colorChange && (
-                <input
-                  type="color"
-                  value={newNote.colorChange}
-                  onChange={(e) => setNewNote({ ...newNote, colorChange: e.target.value })}
-                  className="w-6 h-6 p-0.5 bg-white border border-gray-300 rounded cursor-pointer"
-                />
-              )}
             </div>
             <button
+              type="button"
               onClick={addNote}
-              className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#185FA5] py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#144a84]"
             >
-              <Plus size={16} /> Add Note
+              <Plus size={16} strokeWidth={2.5} />
+              Add annotation
             </button>
           </div>
 
           <div className="space-y-2">
             {notes.map((note) => (
-              <div key={note.id} className="p-3 bg-white border border-gray-200 rounded-lg group">
+              <div
+                key={note.id}
+                className="group rounded-xl border border-slate-100 bg-white p-3 shadow-sm transition-shadow hover:shadow-md"
+              >
                 {editingNoteId === note.id ? (
                   <div className="space-y-2">
                     <input
                       type="text"
                       value={editForm?.label}
                       onChange={(e) => setEditForm({ ...editForm!, label: e.target.value })}
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm outline-none"
+                      className={inputClass}
                     />
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <input 
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="flex items-center gap-2 text-xs text-slate-600">
+                        <input
                           type="checkbox"
                           checked={!!editForm?.colorChange}
-                          onChange={(e) => setEditForm({ ...editForm!, colorChange: e.target.checked ? '#185FA5' : '' })}
-                          className="w-3 h-3"
+                          onChange={(e) =>
+                            setEditForm({ ...editForm!, colorChange: e.target.checked ? '#185FA5' : '' })
+                          }
+                          className="h-3.5 w-3.5 rounded"
                         />
-                        <span className="text-[10px] text-gray-500">Color?</span>
-                        {editForm?.colorChange && (
+                        Tint
+                        {editForm?.colorChange ? (
                           <input
                             type="color"
                             value={editForm.colorChange}
                             onChange={(e) => setEditForm({ ...editForm!, colorChange: e.target.value })}
-                            className="w-4 h-4 p-0"
+                            className="h-6 w-8 cursor-pointer rounded border border-slate-200 p-0"
                           />
-                        )}
-                      </div>
+                        ) : null}
+                      </label>
                       <div className="flex gap-1">
-                        <button onClick={saveEdit} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"><Check size={14}/></button>
-                        <button onClick={() => setEditingNoteId(null)} className="p-1 text-rose-600 hover:bg-rose-50 rounded"><X size={14}/></button>
+                        <button
+                          type="button"
+                          onClick={saveEdit}
+                          className="rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-50"
+                          aria-label="Save"
+                        >
+                          <Check size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingNoteId(null)}
+                          className="rounded-lg p-1.5 text-rose-600 hover:bg-rose-50"
+                          aria-label="Cancel"
+                        >
+                          <X size={16} />
+                        </button>
                       </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center justify-between">
-                    <div className="overflow-hidden">
-                      <p className="text-sm font-semibold truncate">{note.label}</p>
-                      <p className="text-[10px] text-gray-400">{note.date}</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-900">{note.label}</p>
+                      <p className="mt-0.5 font-mono text-[11px] text-slate-500">{note.date}</p>
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex shrink-0 gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
                       <button
+                        type="button"
                         onClick={() => startEditing(note)}
-                        className="p-1 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded"
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-[#185FA5]"
+                        aria-label="Edit annotation"
                       >
-                        <Edit2 size={12} />
+                        <Edit2 size={14} />
                       </button>
                       <button
+                        type="button"
                         onClick={() => removeNote(note.id)}
-                        className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                        aria-label="Remove annotation"
                       >
-                        <Trash2 size={12} />
+                        <Trash2 size={14} />
                       </button>
                     </div>
                   </div>
@@ -407,8 +681,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             ))}
           </div>
-        </div>
-      </section>
-    </div>
+        </CollapsibleSection>
+      </div>
+    </aside>
   );
 };

@@ -18,6 +18,9 @@ export interface ChartNote {
 
 export interface ChartConfig {
   title: string;
+  yAxisTitle: string;
+  movingAverageColor: string;
+  chartBackgroundColor: string;
   datasets: DatasetConfig[];
   stacked: boolean;
   stackedKeys: string[];
